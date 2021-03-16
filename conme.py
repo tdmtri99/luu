@@ -32,7 +32,7 @@ net.setPreferableTarget(cv.dnn.DNN_TARGET_CPU)
 config = {
   "apiKey": "apiKey",
   "authDomain": "od-android-f06ec.firebaseapp.com",
-  "databaseURL": "https://databaseName.firebaseio.com",
+  "databaseURL": "https://od-android-f06ec-default-rtdb.firebaseio.com",
   "storageBucket": "od-android-f06ec.appspot.com"
 }
 
@@ -46,7 +46,40 @@ class cameraFunction:
     def __init__(self):
         self.security = db.child("cameras").child(cameraID).child("security").get()
 
-    def addLog(self):
+    def addLog(self, case, func):
+        date = datetime.datetime.now().strftime("%d-%m-%Y")
+        time = datetime.datetime.now().strftime("%X")
+        data = {
+            'case': case,
+            'func': func
+        }
+        db.child("cameras").child(cameraID).child("logs").child(date).child(time).set(data)
+
+    def videoRecording(self):
+        if self.security == False:
+            # Define the codec and create VideoWriter object
+            fourcc = cv.VideoWriter_fourcc(*'XVID')
+            out = cv.VideoWriter('output.avi', fourcc, 20.0, (640, 480))
+            time_start = datetime.datetime().now();
+            time_end_default = time_start + datetime.timedelta(minutes=10)
+            while cap.isOpened() and datetime.datetime.now() < time_end_default and self.security == False:
+                ret, frame = cap.read()
+                if not ret:
+                    print("Can't receive frame (stream end?). Exiting ...")
+                    break
+                font = cv.FONT_HERSHEY_SCRIPT_COMPLEX
+                dt = str(datetime.datetime.now().strftime("%X"))
+                frame = cv.putText(frame, dt, (10, 250), font, 1, (210, 155, 155), 4, cv.LINE_8)
+                #frame = cv.flip(frame, 0)
+                # write the flipped frame
+                out.write(frame)
+                #cv.imshow('frame', frame)
+            # Release everything if job is finished
+            time_end = datetime.datetime.now()
+            time_start_file_name = time_start.strftime("%X")
+            time_end_file_name = time_end.strftime("%X")
+            out.release()
+
 
     def takePic(self):
         while True:
