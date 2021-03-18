@@ -1,5 +1,12 @@
-from flask import Flask, Response
+from flask import Flask, Response, request, render_template
 import cv2 as cv
+import time as tm
+import datetime
+import numpy as np
+import threading
+import pyrebase
+import os
+from gpiozero import CPUTemperature
 
 
 cap = cv.VideoCapture(0)
@@ -27,7 +34,7 @@ net.setPreferableTarget(cv.dnn.DNN_TARGET_CPU)
 #### LOAD FIREBASE
 
 config = {
-  "apiKey": "AAAATwkzJus:APA91bHH6f2oNgrBpr3Z-i_1RnDyV36RjDvvIRj9NYrOzQvAcQoLbZTEsLKUZc7IsT8CKxCScDXmuctA0GdlONa-QBE670reWxeloH8X9GsfCfPD8k13ZOCXBjqmr46_Evxh2iRfKC2c",
+  "apiKey": "mznK8xnRlWp5jnWzhejK5z1DPprjZOKCRhJ9rUmJ",
   "authDomain": "od-android-f06ec.firebaseapp.com",
   "databaseURL": "https://od-android-f06ec-default-rtdb.firebaseio.com",
   "storageBucket": "od-android-f06ec.appspot.com"
@@ -42,66 +49,84 @@ storage = firebase.storage()
 class cameraFunction:
 
     def __init__(self):
-        self.security = db.child("cameras").child(cameraID).child("security").get()
+        self.security = db.child("cameras").child(cameraID).child("security").get().val()
         self.temp = CPUTemperature().temperature
+        self.stopimmediately = 0
 
-    def addLog(self, case, func):
-        date = datetime.datetime.now().strftime("%d-%m-%Y")
-        time = datetime.datetime.now().strftime("%X")
-        data = {
-            'case': case,
-            'func': func
-        }
-        db.child("cameras").child(cameraID).child("logs").child(date).child(time).set(data)
+    def addLog(self, data):
+        date_set = datetime.datetime.now().strftime("%d-%m-%Y")
+        time_set = datetime.datetime.now().strftime("%X")
+        db.child("cameras").child(cameraID).child("logs").child(date_set).child(time_set).set(data)
 
     def videoRecording(self):
         if self.security == False:
+            print("Start recording")
             #Time define
-            time_start = datetime.datetime().now();
+            time_start = datetime.datetime.now()
             time_end_default = time_start + datetime.timedelta(minutes=10)
+            time_start_file_name = time_start.strftime("%X")
+            time_end_default_file_name = time_end_default.strftime("%X")
             #Try open folder if not exist create it
-            date_now = datetime.datetime.strftime("%d-%m-%y")
-            path_name = './videos/' + date_now
+            date_now = time_start.strftime("%d-%m-%y")
+            path_name = './videos/' + date_now 
             if not os.path.exists(path_name):
                 os.makedirs(path_name)
             # Define the codec and create VideoWriter object
-            first_name = path_name + 'output.avi'
+            first_name = path_name + "/" + time_start_file_name + ' ' + time_end_default_file_name + ' default.avi'
             fourcc = cv.VideoWriter_fourcc(*'XVID')
-            out = cv.VideoWriter(path_name, fourcc, 20.0, (640, 480))
+            out = cv.VideoWriter(first_name, fourcc, 20.0, (640, 480))
             while cap.isOpened() and datetime.datetime.now() < time_end_default and self.security == False:
                 ret, frame = cap.read()
-                if not ret:
-                    print("Can't receive frame (stream end?). Exiting ...")
-                    break
                 font = cv.FONT_HERSHEY_SCRIPT_COMPLEX
                 dt = str(datetime.datetime.now().strftime("%X"))
-                frame = cv.putText(frame, dt, (10, 250), font, 1, (210, 155, 155), 4, cv.LINE_8)
+                frame = cv.putText(frame, dt, (10, 450), font, 1, (210, 155, 155), 4, cv.LINE_8)
                 #frame = cv.flip(frame, 0)
                 # write the flipped frame
                 out.write(frame)
                 #cv.imshow('frame', frame)
             # Release everything if job is finished
             time_end = datetime.datetime.now()
-            time_start_file_name = time_start.strftime("%X")
             time_end_file_name = time_end.strftime("%X")
-            last_name = + time_start_file_name + ' ' + time_end_file_name + '.avi'
+            last_name = path_name + "/" + time_start_file_name + ' ' + time_end_file_name + '.avi'
             out.release()
+            os.rename(first_name, last_name)
+            print("Save video sucess")
 
 
     def takePic(self):
-        while True:
-            ret, frame = cap.read()
-            font = cv.FONT_HERSHEY_SCRIPT_COMPLEX
-            dt = str(datetime.datetime.now().strftime("%X"))
-            frame = cv.putText(frame, dt,(10, 250),font, 1,(210, 155, 155),4, cv.LINE_8)
-            img_name = "./Imgage/" + dt + ".jpg"
-            cv.imwrite(img_name, frame)
-            break
+        ret, frame = cap.read()
+        ###set time###    
+        now = datetime.datetime.now()
+        time = now.strftime("%X")
+        date_now = now.strftime("%d-%m-%y")
+        path_name = './images/' + date_now 
+        if not os.path.exists(path_name):
+            os.makedirs(path_name)
+        img_name = path_name + "/" + time + ".jpg"
+        ###add time in image###
+        font = cv.FONT_HERSHEY_SCRIPT_COMPLEX
+        frame = cv.putText(frame, time,(10, 450),font, 1,(210, 155, 155),4, cv.LINE_8)
+        cv.imwrite(img_name, frame)
         print("Write image complete")
         ######SEND PHOTO TO DATA BASE######
-        #print("Send image to serve")
-        #storage.child("images/" + cameraID + "/" + dt +".jpg").put(img_name)
-        #print("Send image done")
+        print("Send image to serve")
+        storage.child("images/" + cameraID + "/" + date_now + "/" + time +".jpg").put(img_name)
+        img_url = storage.child("images/" + cameraID + "/" + date_now + "/" + time +".jpg").get_url(None)
+
+        data = {
+            'case': 'Security alarm',
+            'func': 'Some person at home',
+            'image': img_url
+        }
+        self.addLog(data)
+        print("Send image done")
+        
+    def personDectec(self):
+        if self.stopimmediately == 1:
+            Thr = threading.Thread(target=self.takePic)
+            Thr.start()
+            db.child("cameras").child(cameraID).update({"security":False})
+            print("Some one at home")
 
     def findPerson(self,outputs, img):
         #hT, wT, cT = img.shape
@@ -114,11 +139,11 @@ class cameraFunction:
                 classId = np.argmax(scores)
                 confidence = scores[classId]
                 if confidence > confThreshold:
-                    Thr = threading.Thread(target=self.takePic())
+                    self.stopimmediately += 1
+                    Thr = threading.Thread(target=self.personDectec)
                     Thr.start()
-                    
-                    print("Some one at home")
                     return
+            
                     #w, h = int(det[2] * wT), int(det[3] * hT)
                     #x, y = int((det[0] * wT) - w / 2), int((det[1] * hT) - h / 2)
                     #bbox.append([x, y, w, h])
@@ -149,25 +174,41 @@ class cameraFunction:
             outputs = net.forward(outputNames)
 
             self.findPerson(outputs, img)
-            cv.imshow('Image', img)
-            cv.waitKey(1)
+            #cv.imshow('Image', img)
+            #cv.waitKey(1)
             
     def stream_temple(self):
         self.temp = CPUTemperature().temperature
         if self.temp < 70:
-            time.sleep(10)
+            tm.sleep(10)
         else:
-            self.addLog("Control by camera", "Turn off security to coolboot cpu")
-            time.sleep(10)
-            self.addLog("Control by camera", "Turn on security, coolboot cpu complete")
+            db.child("cameras").child(cameraID).update({"security":False})
+            data1 = {
+                'case': "Control by camera",
+                'func': "Turn off security to coolboot cpu"
+            }
+            self.addLog(data1)
+            tm.sleep(10)
+            db.child("cameras").child(cameraID).update({"security":True})
+            data2 = {
+                'case': "Control by camera",
+                'FutureWarningnc': "Turn on security, coolboot complete"
+            }
+            self.addLog(data2)
 
     def stream_handler(self,message):
-        self.security  = db.child("cameras").child(cameraID).child("security").get()
+        self.security  = db.child("cameras").child(cameraID).child("security").get().val()
+        print(self.security)
         if self.security == True:
-            Thr = threading.Thread(target=self.objDection())
+            self.stopimmediately = 0
+            Thr = threading.Thread(target=self.objDection)
+            Thr.start()
+        else:
+            Thr = threading.Thread(target=self.videoRecording)
             Thr.start()
 
     def whenDataChage(self):
+        print('data stream')
         my_stream = db.child("cameras").child(cameraID).child("security").stream(self.stream_handler)
         
         
@@ -177,24 +218,26 @@ class cameraFunction:
 app = Flask(__name__)
 @app.route('/')
 def index():
-    return "Default Message"
+    return render_template('index.html')
 
-def gen(video):
-    while True:
-        success, image = cap.read()
-        ret, jpeg = cv.imencode('.jpg', image)
-        frame = jpeg.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n\r\n')
+def gen():
+    while cap.isOpened():
+        success, frame = cap.read()
+        if success:
+            ret, buffer = cv.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            
 
 @app.route('/video_feed')
 def video_feed():
-    global video
-    return Response(gen(video),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+       
+
 
 def runserve():
-    app.run(host='192.168.4.144', threaded=True, debug=False)
+    app.run(host='192.168.4.144', debug=False)
     
 ###########################MAINMAIN################################
 if __name__ == "__main__":
@@ -205,4 +248,3 @@ if __name__ == "__main__":
     t1.start()
     t2.start()
     
-    print(db.child("cameras").child(cameraID).child("security").get())
